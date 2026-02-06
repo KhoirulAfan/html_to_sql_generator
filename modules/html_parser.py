@@ -1,18 +1,13 @@
 """
-HTML Parser Module - FIXED VERSION
-Fungsi untuk parsing HTML table ke pandas DataFrame
+HTML Parser Module - Parse HTML tables to DataFrame
 """
-
 import pandas as pd
 from bs4 import BeautifulSoup
 
 
 def input_html():
-    """
-    Input HTML content dari user
-    Returns: string HTML
-    """
-    print("\n📋 Paste HTML table Anda di bawah ini.")
+    """Input HTML dari user via console"""
+    print("\n📋 Paste HTML table di bawah ini.")
     print("Ketik 'END' pada baris baru untuk selesai:\n")
     
     lines = []
@@ -25,92 +20,132 @@ def input_html():
         except EOFError:
             break
     
-    html_content = '\n'.join(lines)
-    return html_content
+    return '\n'.join(lines)
+
+
+def auto_fix_html(html_content):
+    """Auto-fix HTML table - add missing </tr> tags"""
+    lines = html_content.split('\n')
+    fixed = []
+    in_tr = False
+    
+    for line in lines:
+        s = line.strip()
+        
+        # Opening <tr>
+        if s.startswith('<tr'):
+            if in_tr:  # Close previous unclosed <tr>
+                fixed.append('</tr>')
+            fixed.append(line)
+            in_tr = True
+        
+        # Closing </tr>
+        elif '</tr>' in s:
+            fixed.append(line)
+            in_tr = False
+        
+        # Table end
+        elif s.startswith('</table>'):
+            if in_tr:
+                fixed.append('</tr>')
+                in_tr = False
+            fixed.append(line)
+        
+        # Regular content
+        else:
+            fixed.append(line)
+    
+    # Final cleanup
+    if in_tr:
+        fixed.append('</tr>')
+    
+    return '\n'.join(fixed)
 
 
 def parse_html_table(html_content):
     """
-    Parse HTML table menjadi pandas DataFrame
-    FIXED: Handle column count mismatch
+    Parse HTML table to DataFrame
     
     Args:
         html_content (str): HTML string containing table
         
     Returns:
-        pandas.DataFrame: Parsed table data
+        pd.DataFrame or None: Parsed data as DataFrame
     """
     try:
-        # Parse dengan BeautifulSoup
-        soup = BeautifulSoup(html_content, 'lxml')
+        # Auto-fix HTML first
+        print("🔧 Fixing HTML structure...")
+        html_content = auto_fix_html(html_content)
         
-        # Cari table
+        # Parse with BeautifulSoup
+        soup = BeautifulSoup(html_content, 'html.parser')
         table = soup.find('table')
+        
         if not table:
-            print("❌ Tidak ditemukan tag <table> dalam HTML")
+            print("❌ No <table> found in HTML")
             return None
         
-        # Extract headers dari <th>
+        # Extract headers
         headers = []
         header_row = table.find('tr')
         if header_row:
             for th in header_row.find_all('th'):
-                header_text = th.get_text(strip=True)
-                headers.append(header_text)
+                headers.append(th.get_text(strip=True))
         
         if not headers:
-            print("❌ Tidak ditemukan header (<th>) dalam table")
+            print("❌ No headers (<th>) found in table")
             return None
         
-        print(f"📊 Ditemukan {len(headers)} kolom header")
+        print(f"📊 Found {len(headers)} columns: {headers[:5]}..." if len(headers) > 5 else f"📊 Found {len(headers)} columns")
         
         # Extract data rows
         rows = []
         all_trs = table.find_all('tr')
         
         for i, tr in enumerate(all_trs[1:], 1):  # Skip header row
-            cells = []
             tds = tr.find_all('td')
             
-            # Ambil semua cell
-            for td in tds:
-                cell_text = td.get_text(strip=True)
-                cells.append(cell_text)
+            if not tds:
+                continue
             
-            # Skip empty rows
+            # Get cell values
+            cells = [td.get_text(strip=True) for td in tds]
+            
+            # Skip completely empty rows
             if not cells or all(c == '' for c in cells):
                 continue
             
-            # FIX: Pad atau trim cells agar sesuai dengan jumlah headers
+            # Adjust cell count to match headers
             if len(cells) < len(headers):
-                # Pad dengan empty string jika kurang
                 cells.extend([''] * (len(headers) - len(cells)))
-                print(f"⚠️  Row {i}: Padded {len(headers) - len(cells)} missing columns")
             elif len(cells) > len(headers):
-                # Trim jika lebih
-                print(f"⚠️  Row {i}: Trimmed {len(cells) - len(headers)} extra columns")
                 cells = cells[:len(headers)]
             
             rows.append(cells)
+            
+            # Progress indicator for first few rows
+            if i <= 3:
+                print(f"  Row {i}: {len(cells)} cells")
         
         if not rows:
-            print("❌ Tidak ada data rows ditemukan")
+            print("❌ No data rows found")
             return None
         
-        # Buat DataFrame
+        print(f"✅ Parsed {len(rows)} data rows\n")
+        
+        # Create DataFrame
         df = pd.DataFrame(rows, columns=headers)
         
         # Clean data
-        df = df.replace('', None)  # Empty string jadi NULL
-        df = df.replace('0000-00-00', None)  # Invalid date jadi NULL
-        df = df.replace('0000-00-00 00:00:00', None)  # Invalid datetime jadi NULL
+        df = df.replace('', None)
+        df = df.replace('0000-00-00', None)
+        df = df.replace('0000-00-00 00:00:00', None)
         
-        # Clean leading apostrophes (from Excel-style text formatting)
+        # Clean leading apostrophes (Excel-style text markers)
         for col in df.columns:
-            if df[col].dtype == 'object':
-                df[col] = df[col].apply(lambda x: x[1:] if isinstance(x, str) and x.startswith("'") else x)
-        
-        print(f"✓ Berhasil parse {len(df)} baris × {len(df.columns)} kolom")
+            df[col] = df[col].apply(
+                lambda x: x[1:] if isinstance(x, str) and x.startswith("'") else x
+            )
         
         return df
         
@@ -122,21 +157,38 @@ def parse_html_table(html_content):
 
 
 def parse_html_from_file(file_path):
-    """
-    Parse HTML table dari file
+    """Parse HTML table from file
     
     Args:
-        file_path (str): Path ke file HTML
+        file_path (str): Path to HTML file
         
     Returns:
-        pandas.DataFrame: Parsed table data
+        pd.DataFrame or None: Parsed data
     """
     try:
+        print(f"📂 Reading file: {file_path}")
         with open(file_path, 'r', encoding='utf-8') as f:
-            html_content = f.read()
-        
-        return parse_html_table(html_content)
-        
+            html = f.read()
+        return parse_html_table(html)
     except Exception as e:
         print(f"❌ Error reading file: {e}")
         return None
+
+
+def save_to_csv(df, filename="parsed_data.csv"):
+    """Save DataFrame to CSV
+    
+    Args:
+        df (pd.DataFrame): DataFrame to save
+        filename (str): Output filename
+        
+    Returns:
+        bool: Success status
+    """
+    try:
+        df.to_csv(filename, index=False, encoding='utf-8-sig')
+        print(f"✅ Saved to CSV: {filename}")
+        return True
+    except Exception as e:
+        print(f"❌ Error saving CSV: {e}")
+        return False

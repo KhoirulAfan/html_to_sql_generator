@@ -1,66 +1,85 @@
-"""
-HTML to SQL Converter
-Main entry point untuk aplikasi
-"""
 
 from modules.html_parser import input_html, parse_html_table
-from modules.preview import preview_data
-from modules.sql_generator import generate_sql
-from modules.output import output_sql
-
-
-def print_header():
-    """Print header aplikasi"""
-    print("=" * 60)
-    print("  HTML TABLE TO SQL CONVERTER")
-    print("  Version 2.0 - Bug Fixed Edition")
-    print("=" * 60)
+from modules.sql_generator_advance import generate_sql_advanced, save_sql
 
 
 def main():
-    """Main function"""
-    print_header()
+    print("\n" + "="*60)
+    print("  HTML TO SQL GENERATOR")
+    print("="*60)
     
-    # Input HTML
-    html_content = input_html()
+    # 1. Input Subdomain
+    print("\n🏷️  SUBDOMAIN CONFIGURATION")
+    subdomain = input("Masukkan subdomain (contoh: sekolah123): ").strip()
     
-    # Parse HTML
-    print("\n Parsing HTML...")
-    df = parse_html_table(html_content)
+    if not subdomain:
+        print("❌ Subdomain tidak boleh kosong!")
+        return
+    
+    print(f"✅ Subdomain: {subdomain}")
+    
+    # 2. Input HTML
+    html = input_html()
+    if not html:
+        print("❌ No HTML")
+        return
+    
+    # 3. Parse
+    print("\n📋 Parsing HTML...")
+    df = parse_html_table(html)
     
     if df is None or df.empty:
-        print(" Tidak ada data yang ditemukan.")
+        print("❌ Parse failed")
         return
     
-    print(f"✓ Berhasil parse {len(df)} baris data")
+    print(f"✅ Success: {len(df)} rows × {len(df.columns)} columns")
     
-    # Preview data (simpan FULL dataframe)
-    full_df = preview_data(df)
+    # 4. Add subdomain column to DataFrame
+    print(f"\n🔧 Adding subdomain '{subdomain}' to all rows...")
+    df.insert(0, 'subdomain', subdomain)
+    print(f"✅ Subdomain added to {len(df)} rows")
     
-    # Konfirmasi generate SQL
-    confirm = input("\nLanjut ke generate SQL? (y/n): ").strip().lower()
+    # 5. Preview
+    print(f"\n🔍 Preview (first 3 rows):")
+    print(df.head(3).to_string())
     
-    if confirm != 'y':
-        print("✓ Dibatalkan.")
+    # 6. Confirm
+    ok = input("\n▶ Generate SQL? (y/n): ").strip().lower()
+    if ok != 'y':
+        print("❌ Cancelled")
         return
     
-    # Generate SQL dari SEMUA data
-    print(f"\n  Generating SQL untuk {len(full_df)} baris...")
-    sql_queries = generate_sql(full_df)
+    # 7. Generate INSERT statements only
+    print("\n🔧 Generating INSERT statements...")
+    table = "psb_member"  # Fixed table name
+    sql_dict = generate_sql_advanced(df, table_name=table)
     
-    # Output SQL
-    output_sql(sql_queries)
+    # 8. Extract only INSERT statements (no CREATE TABLE)
+    insert_only = {
+        'inserts': sql_dict['inserts'],
+        'full_sql': '\n'.join(sql_dict['inserts'])
+    }
     
-    print("\n✓ Selesai!")
-    print(f" Total {len(sql_queries)} query SQL berhasil di-generate")
+    print(f"✅ Generated {len(sql_dict['inserts'])} INSERT statements")
+    
+    # 9. Save
+    outfile = input("\nOutput file (default: insert_psb_member.sql): ").strip() or "insert_psb_member.sql"
+    
+    if not outfile.endswith('.sql'):
+        outfile += '.sql'
+    
+    if save_sql(insert_only, outfile):
+        print(f"\n{'='*60}")
+        print(f"🎉 SUCCESS!")
+        print(f"{'='*60}")
+        print(f"📊 Total rows: {len(df)}")
+        print(f"📝 INSERT statements: {len(sql_dict['inserts'])}")
+        print(f"💾 File saved: {outfile}")
+        print(f"🏷️  Subdomain: {subdomain}")
+        print(f"{'='*60}")
+    else:
+        print("\n❌ Save failed")
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n\n  Program dihentikan oleh user.")
-    except Exception as e:
-        print(f"\n❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
+    main()
